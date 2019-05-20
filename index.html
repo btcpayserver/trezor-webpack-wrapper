@@ -1,0 +1,113 @@
+<html>
+
+<head>
+    <script src="lib/trezor.js-umd.js"></script>
+    <script>
+        window.onload = function () {
+
+            debugger;
+            var debug = true;
+            var list = new trezor.DeviceList({
+                // trezorConfig,
+                debug
+            });
+
+            list.on('connect', function (device) {
+                if (debug) {
+                    console.log('Connected a device:', device);
+                    console.log('Devices:', list.asArray());
+                }
+                console.log("Connected device " + device.features.label);
+
+                // What to do on user interactions:
+                device.on('button', function (code) { console.log("button", device.features.label, code); });
+                device.on('passphrase', console.log);
+                device.on('pin', console.log);
+
+                // For convenience, device emits 'disconnect' event on disconnection.
+                device.on('disconnect', function () {
+                    if (debug) {
+                        console.log('Disconnected an opened device');
+                    }
+                });
+
+                // You generally want to filter out devices connected in bootloader mode:
+                if (device.isBootloader()) {
+                    throw new Error('Device is in bootloader mode, re-connected it');
+                }
+
+                var hardeningConstant = 0x80000000;
+
+                // low level API
+                device.waitForSessionAndRun(function (session) {
+                    if (debug) {
+                        console.log("I will call now.");
+                    }
+                    return session.typedCall("GetEntropy", "Entropy", { size: 10 }).then(entropy => {
+                        if (debug) {
+                            console.log("I have called now.");
+                        }
+                        console.log("Random hex-string is " + entropy.message.entropy);
+                    });
+                }).then(function () {
+
+                    // high level API
+
+                    // Ask the device to show first address of first account on display and return it
+                    return device.waitForSessionAndRun(function (session) {
+                        return session.getAddress([
+                            (44 | hardeningConstant) >>> 0,
+                            (0 | hardeningConstant) >>> 0,
+                            (0 | hardeningConstant) >>> 0,
+                            0,
+                            0
+                        ], 'bitcoin', true)
+                    })
+                        .then(function (result) {
+                            console.log('Address:', result.message.address);
+                        })
+                })
+
+                    .catch(function (error) {
+                        // Errors can happen easily, i.e. when device is disconnected or request rejected
+                        // Note: if there is general error handler, that listens on device.on('error'),
+                        // both this and the general error handler gets called
+                        console.error('Call rejected:', error);
+                    });
+            });
+
+            // Note that this is a bit duplicate to device.on('disconnect')
+            list.on('disconnect', function (device) {
+                if (debug) {
+                    console.log('Disconnected a device:', device);
+                    console.log('Devices:', list.asArray());
+                }
+                console.log("Disconnected device " + device.features.label);
+            });
+
+            // This gets called on general error of the devicelist (no transport, etc)
+            list.on('error', function (error) {
+                console.error('List error:', error);
+            });
+
+            // On connecting unacquired device
+            list.on('connectUnacquired', function (device) {
+                askUserForceAcquire(function () {
+                    device.steal().then(function () {
+                        console.log("steal done. now wait for another connect");
+                    });
+                });
+            });
+
+            // an example function, that asks user for acquiring and
+            // calls callback if use agrees
+            // (in here, we will call agree always, since it's just an example)
+            function askUserForceAcquire(callback) {
+                return setTimeout(callback, 1000);
+            }
+
+        }
+    </script>
+</head>
+
+</html>
